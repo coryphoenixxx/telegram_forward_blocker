@@ -1,67 +1,135 @@
 import os
-from logging.handlers import TimedRotatingFileHandler
+import json
 
 from telethon.sync import TelegramClient, events
 from telethon.events.newmessage import NewMessage
-
-import json
-from cachetools.func import ttl_cache
-from dotenv import load_dotenv
-import logging
-
 from telethon.tl.patched import Message
+
+from dotenv import load_dotenv
 
 load_dotenv()
 
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
-TTL_SECS = int(os.getenv('TTL_SECS'))
 
 
-def create_timed_rotating_log(path):
-    logger = logging.getLogger("Rotating Log")
-    logger.setLevel(logging.INFO)
-
-    handler = TimedRotatingFileHandler(
-        path,
-        when="d",
-        interval=1,
-        backupCount=0,
-        encoding='utf-8'
-    )
-    logger.addHandler(handler)
+def keytoint(d: dict):
+    return {int(k) if k.lstrip('-').isdigit() else k: v for k, v in d.items()}
 
 
-@ttl_cache(ttl=TTL_SECS)
-def load_blocked_ids():
-    with open('blocked_data.json', 'r') as json_file:
-        blocked_data = json.load(json_file)
-        return blocked_data['blocked_chat_ids'], blocked_data['blocked_from_channels_ids']
+def load_blocked_data():
+    try:
+        with open('blocked_data.json', 'r', encoding='utf-8') as json_file:
+            return json.load(json_file, object_hook=keytoint)
+    except (FileNotFoundError, json.JSONDecodeError):
+        with open('blocked_data.json', 'w', encoding='utf-8') as json_file:
+            json.dump({}, json_file, ensure_ascii=False, indent=4)
+        return {}
+
+
+def dump_blocked_data(data: dict):
+    with open('blocked_data.json', 'w', encoding='utf-8') as json_file:
+        json.dump(data, json_file, ensure_ascii=False, indent=4)
+
+
+def add_blocked_channel(
+        blocked_data: dict,
+        current_chat_id: int,
+        forwarded_from_channel_id: int,
+        title: str,
+        comment: str
+):
+    channel_desc = {
+        'ChannelTitle': title.strip(),
+        'AdminComment': comment.strip()
+    }
+
+    current_chat_info = blocked_data.get(current_chat_id)
+    if current_chat_info:
+        current_chat_info[forwarded_from_channel_id] = channel_desc
+    else:
+        current_chat_info = {forwarded_from_channel_id: channel_desc}
+    blocked_data[current_chat_id] = current_chat_info
+    return blocked_data
+
+
+def remove_blocked_channel(blocked_data: dict, current_chat_id: int, forwarded_from_channel_id: int):
+    current_chat_info = blocked_data.get(current_chat_id)
+    if current_chat_info:
+        current_chat_info.pop(forwarded_from_channel_id, None)
+        if current_chat_info == {}:
+            blocked_data.pop(current_chat_id)
+        elif current_chat_info:
+            blocked_data[current_chat_id] = current_chat_info
+    return blocked_data
 
 
 if __name__ == '__main__':
-    create_timed_rotating_log('logs.log')
-
     with TelegramClient('telethonblocker', API_ID, API_HASH) as client:  # type: TelegramClient
+
         client.send_message('me', "Hello, it's telethonblocker!")
 
 
-        @client.on(events.NewMessage(incoming=True, forwards=True))
-        async def handler(event: NewMessage.Event):
-            blocked_chat_ids, blocked_from_channels_ids = load_blocked_ids()
+        @client.on(events.NewMessage(from_users='me', pattern="^//*", outgoing=True))
+        async def block_handler(event: NewMessage.Event):
+            admin_message_obj: Message = event.message
+            current_chat_id = admin_message_obj.chat_id
+            admin_command: str = admin_message_obj.message
 
-            if event.chat_id in blocked_chat_ids:
-                message: Message = event.message
+            if admin_command.startswith('//block') or admin_command == '//unblock':
                 try:
-                    from_channel_id = message.fwd_from.from_id.channel_id
+                    target_message_id = admin_message_obj.reply_to.reply_to_msg_id
                 except AttributeError:
-                    ...
+                    pass
                 else:
-                    if from_channel_id in blocked_from_channels_ids:
-                        await message.delete()
+                    target_message_obj: Message = await client.get_messages(current_chat_id, ids=target_message_id)
+
+                    try:
+                        forwarded_from_channel_id = target_message_obj.fwd_from.from_id.channel_id
+                    except AttributeError:
+                        pass
                     else:
-                        print(f"{event.chat_id} {message.message}")
-                        logging.info(f"{event.chat_id} {message.message}")
+                        blocked_data = load_blocked_data()
+                        if admin_command.startswith('//block'):
+                            try:
+                                _, title, comment = admin_command.split(':')
+                            except ValueError:
+                                title, comment = '', ''
+                            blocked_data = add_blocked_channel(
+                                blocked_data, current_chat_id, forwarded_from_channel_id, title, comment
+                            )
+
+                        elif admin_command == '//unblock':
+                            blocked_data = remove_blocked_channel(
+                                blocked_data, current_chat_id, forwarded_from_channel_id
+                            )
+
+                        dump_blocked_data(blocked_data)
+
+
+        @client.on(events.NewMessage(incoming=True, forwards=True))
+        async def delete_msg_handler(event: NewMessage.Event):
+            message_obj: Message = event.message
+            current_chat_id: int = event.chat_id
+
+            blocked_data = load_blocked_data()
+
+            try:
+                from_channel_id = message_obj.fwd_from.from_id.channel_id
+            except AttributeError:
+                pass
+            else:
+                current_chat_blocked_data = blocked_data.get(current_chat_id)
+
+                if current_chat_blocked_data and from_channel_id in current_chat_blocked_data.keys():
+                    await message_obj.delete()
+                    title = current_chat_blocked_data[from_channel_id]['ChannelTitle']
+                    comment = current_chat_blocked_data[from_channel_id]['AdminComment']
+                    if title and comment:
+                        await client.send_message(
+                            current_chat_id,
+                            f"Сообщение от канала «{title}» удалено по причине: **\"{comment}\"**"
+                        )
 
 
         client.run_until_disconnected()
