@@ -46,7 +46,8 @@ async def info_command_handler(event: events.NewMessage.Event):
         await event.client.send_message(
             entity=event.chat_id,
             message="<u>Список заблокированных каналов в этом чате</u>:\n" + '\n'.join(blocked_data_text_list),
-            parse_mode='html'
+            parse_mode='html',
+            reply_to=event.message
         )
     else:
         await event.client.send_message(event.chat_id, "В этом чате нет заблокированных каналов.")

@@ -1,0 +1,12 @@
+.venv
+__pycache__
+*.session
+*.json
+session.txt
+venv
+.env
+.git*
+.dockerignore
+.idea
+docker-compose.yml
+auth.py

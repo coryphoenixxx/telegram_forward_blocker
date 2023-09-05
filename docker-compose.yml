@@ -1,0 +1,17 @@
+services:
+  app:
+    container_name: telegram-forward-blocker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: telegram-forward-blocker:latest
+    env_file:
+      - ./.env
+    secrets:
+      - session
+    volumes:
+      - ./data:/app/data
+
+secrets:
+  session:
+    file: ./data/session.txt

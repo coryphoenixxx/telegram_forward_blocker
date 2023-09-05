@@ -1,19 +1,22 @@
 from telethon.sync import TelegramClient
-from repository import BlockedDataRepo
-import handlers
+from telethon.sessions import StringSession
+from src.repository import BlockedDataRepo
+from src import handlers
 
 
 class Client(TelegramClient):
     def __init__(
             self,
-            app_name: str,
+            session: str | None,
+            app_title: str,
             api_id: int,
             api_hash: str,
             repo: BlockedDataRepo,
     ):
-        super().__init__(app_name, api_id, api_hash)
+        super().__init__(StringSession(session), api_id, api_hash)
+
         self.repo = repo
-        self.app_name = app_name
+        self.app_name = app_title
         self._register_handlers()
 
     def _register_handlers(self):

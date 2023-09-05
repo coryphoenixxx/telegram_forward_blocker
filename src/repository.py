@@ -1,12 +1,12 @@
 import json
 
-from utils import keytoint
+from src.utils import keytoint
 
 
 class BlockedDataRepo:
     def __init__(self):
-        self._json_file = 'blocked_data.json'
-        self._blocked_data = self._load_from_json(self._json_file)
+        self._json_file_path = './data/blocked_data.json'
+        self._blocked_data = self._load_from_json(self._json_file_path)
 
     def add_channel(
             self,
@@ -26,7 +26,7 @@ class BlockedDataRepo:
         else:
             current_chat_info = {forwarded_from_channel_id: channel_desc}
         self._blocked_data[current_chat_id] = current_chat_info
-        self._dump_to_json(self._blocked_data, self._json_file)
+        self._dump_to_json(self._blocked_data, self._json_file_path)
 
     def delete_channel(self, current_chat_id: int, forwarded_from_channel_id: int):
         current_chat_info = self._blocked_data.get(current_chat_id)
@@ -36,7 +36,7 @@ class BlockedDataRepo:
                 self._blocked_data.pop(current_chat_id)
             elif current_chat_info:
                 self._blocked_data[current_chat_id] = current_chat_info
-        self._dump_to_json(self._blocked_data, self._json_file)
+        self._dump_to_json(self._blocked_data, self._json_file_path)
 
     def get_channel_data(self, channel_id: int):
         return self._blocked_data.get(channel_id)

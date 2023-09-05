@@ -1,0 +1,2 @@
+class SessionFileNotFoundError(Exception):
+    pass
